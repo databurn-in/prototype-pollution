@@ -89,11 +89,11 @@ if(user.admin){
 }
 ```
 
-In that logic, the developer is check for the existence of *admin* property on the *user* object. If the admin property exists, they're trying to execute critical admin-related stuff. That's where we can pollute the prototype. 
+In that logic, the developer is checking for the existence of *admin* property on the *user* object. If the admin property exists, they're trying to execute critical admin-related stuff. That's where we can pollute the prototype. 
 
 We can say something like, `Object.prototype.admin = true`.
 
-And now, when that logic is being executed, the browser tries to get the *admin* property of the *user* object. As this property doesn't exist on the *user* object, it's prototype will be checked (and it's prototype is the `Object`). As we had created this *admin* property on the `Object`, it will be considered and used! And we get inside that if condition and take control of the admin related tasks! That's basically what Prototype Pollution is!
+And now, when that logic is being executed, the JavaScript compiler tries to get the *admin* property of the *user* object. As this property doesn't exist on the *user* object, it's prototype will be checked (and it's prototype is the `Object`). As we had created this *admin* property on the `Object`, it will be considered and used! And we get inside that if condition and take control of the admin related tasks! That's basically what Prototype Pollution is!
 
 
 
