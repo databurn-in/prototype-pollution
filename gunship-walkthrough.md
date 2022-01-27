@@ -6,7 +6,7 @@ This repository will provide the files just in case the challenge is taken down 
 
 This challenge is about exploiting Prototype Pollution and trying to modify the template function created by the template engine. The template engine used with this challenge is [Pug](https://pugjs.org/api/getting-started.html).
 
-`pug.compile()` method takes in the pug's source code as it's parameter (which might look something like this "*p #{name}'s Pug source code!*") and returns a function. This function can then be called to get the HTML.
+`pug.compile()` method takes the pug's source code as input parameter (which might look something like this "*p #{name}'s Pug source code!*") and returns a function. This function can then be called to get the HTML.
 
 Example from Pug's website looks like this: 
 
@@ -19,32 +19,42 @@ console.log(compiledFunction({name: 'Timothy'}));
 // "<p>Timothy's Pug source code!</p>"
 ```
 
-So, for this challenge, we need to somehow inject our own payload into that *compiledFunction()* so that it is then executed.
+So, for this challenge, we need to somehow inject our own "payload" into that *compiledFunction()* so that it is executed when that function is called.
 
 Let's download and walkthrough the challenge.
 
 The challenge originally runs in Docker but we can simply extract the zip file, run `npm install` in the `challenge/` directory and run `npm start` to start this challenge on the host machine instead of Docker so that we can attach a debugger to this application and add breakpoints and stuff.
 
-Open http://localhost:1337 and insert the artist name "Haigh" so that we get into the if condition.
+Open http://localhost:1337 and insert the artist name as "Haigh" so that we get into the if condition. [in `challenge/routes/index.js` file]
+
+```javascript
+if (artist.name.includes('Haigh') || artist.name.includes('Westaway') || artist.name.includes('Gingell')) {
+	return  res.json({
+	'response':  pug.compile('span Hello #{user}, thank you for letting us know!')({ user:  'guest' })
+	});
+}
+```
 
 Now, let's start dissecting the code and let's dig it deep to find a way to exploit prototype pollution! Remember that you won't be told that this challenge is about Prototype Pollution. You'll have to research and tinker around a bit to figure that out! The prototype pollution vulnerability was originally in the `flat` nodejs module used in this challenge and [it's now been fixed](https://github.com/hughsk/flat/commit/20ef0ef55dfa028caddaedbcb33efbdb04d18e13). This challenge uses the vulnerable version of `flat` so that we can learn about the prototype pollution that existed earlier!
 
-Also, you might want to research a bit about some of the code compilation processes like what is a lexer, a parser, what is code generation etc before diving into this challenge as it will greatly help understand the code. Maybe just going through [this page](https://www.tutorialspoint.com/compiler_design/compiler_design_phases_of_compiler.htm) would be sufficient!
+Also, you might want to research a bit about some of the code compilation processes like what lexer is, a parser, what is code generation etc before diving into this challenge as it will greatly help understand the code. Maybe just going through [this page](https://www.tutorialspoint.com/compiler_design/compiler_design_phases_of_compiler.htm) would be sufficient!
 
-As pug is also sort of like a compiler, it will be very helpful to understand how a generic compiler works!
+As pug is also sort of like a compiler, so knowing how compilers work would be very helpful to trace the code of Pug.
 
-The below are my rough notes that I made while tracing through the code to find prototype pollution:
+Below are the rough notes that I made while tracing through the code to find prototype pollution:
+
+I started making these notes while stepping into the code using the debugger.
+
+    notes.txt:
 
 ```
-
-
 pug.compile()
 
-compileBody [pub/lib/index.js] : Compile the given `str` of pug and return a function body.
+compileBody [in node_modules/pub/lib/index.js] : Compile the given `str` of pug and return a function body.
 
-load.string(str, options) [pug-load/index.js]: an operating point for lexer and parser. From here, we call both lexer and parser.
+load.string(str, options) [node_modules/pug-load/index.js]: an operating point for lexer and parser. From here, we call both lexer and parser.
 
-new Lexer(str, options) [pug-lexer/index.js]: returns tokens.
+new Lexer(str, options) [node_modules/pug-lexer/index.js]: returns tokens.
 getTokens()
 	callLexerFunction('advance')
 	advance() -> this function calls many different smaller functions like blank(), eos(), endInterpolation(), ...., block()
@@ -199,11 +209,11 @@ After parser completes, the Abstract Syntax Tree (AST) looks like this:
 
 After the AST is created, Pug "walks" through the AST to see if any transformation is need.
 
-we'll call walk(ast, function()) function from the pug-load file. Again, pug-load is like the center point of all the important processes happening in pug library.
+we'll call walk(ast, function()) function from the pug-load module. Again, pug-load is like the center point of all the important processes happening in pug library.
 
 calling walk() will take us to pug-walk module.
 
-walkAST(ast, before, after, options) [pug-walk/index.js]
+walkAST(ast, before, after, options) [node_modules/pug-walk/index.js]
 
 Here, 
 
@@ -212,8 +222,8 @@ before = function() {
 	...
 }
 
-after will be undefined.
-and options will be undefined as well.
+'after' will be undefined.
+and 'options' will be undefined as well.
 
 There is a switch case in walkAST() which is very important.
 
@@ -307,12 +317,7 @@ After the walkAST() is complete, the resulting AST will look like this!
   line: 0,
 }
 
-Lastly, this AST is passed through the Code Generator to get the JavaScript code for our template function.
-
-generateCode(ast, options) [pug-code-gen/index.js]
-new Compiler(ast, options).compile();
-
-
+More specifically, check out this part of that JSON:
 {
   type: "Code",
   val: "user",
@@ -326,6 +331,11 @@ new Compiler(ast, options).compile();
     val: "console.log('this has been executed!!!!!')",
   },
 }
+
+Lastly, this AST is passed through the Code Generator to get the JavaScript code for our template function.
+
+generateCode(ast, options) [node_modules/pug-code-gen/index.js]
+new Compiler(ast, options).compile();
 
 But in the template function, "console.log('this has been executed!!!!!')" will be added as a string and won't be executed.
 
@@ -358,8 +368,7 @@ How do we do that? By the following payload:
 Object.prototype.block = {"type": "Text", "line": "console.log('hello there!')"};
 
 The above line will appear in the 'Code' block of the AST again but check out the function:
-visitCode: function(code)
-more specifically, the line number 786 of index.js file in pug-code-gen module.
+visitCode: function(code): more specifically, the line number 786 of index.js file in pug-code-gen module.
 We are checking the following condition
 if (code.block) {
 	...
@@ -420,13 +429,13 @@ After our pollution payload, the 'Code' block of the AST will be like this:
   line: 0,
 }
 
-We're passing the code.block to visit(). The code.block value will be:
+As we're passing the code.block to visit(), the code.block value will be:
 {
 	type: "Text",
 	line: "console.log('hello there!')",
 } 
 
-In the visit(node) method, we have the following
+In the visit(node) method, we have the following:
 if (debug && node.debug !== false && node.type !== 'Block') {
       if (node.line) {
         var js = ';pug_debug_line = ' + node.line;
@@ -436,7 +445,7 @@ if (debug && node.debug !== false && node.type !== 'Block') {
       }
 }
 
-That node.line is our payload. That ";pug_debug_line = ' + node.line" line will be ";pug_debug_line = ' + console.log('hello there!')"
+That node.line will our payload. That ";pug_debug_line = ' + node.line" line will result in ";pug_debug_line = ' + console.log('hello there!')"
 
 And our output template function code will look like this:
 
@@ -484,7 +493,6 @@ Or, if you're sending the payload from a script in the form of JSON, then the pa
 And you can get the flag in the UI!
 
 ```
-
 
 
 
